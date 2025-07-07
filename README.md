@@ -6,6 +6,8 @@ The story begins with the Arthur D. Healey School, which underwent a significant
 
 ## What the Data Reveals
 
+![alt text](results/trend.png)
+
 **Predictable patterns in family school selection.** The data reveals distinct demographic clustering across schools, suggesting that family school choice decisions follow identifiable patterns. Understanding these patterns could inform how education platforms present school information, design recommendation algorithms, or structure choice support tools for families.
 
 **Technology-enabled choice amplifies demographic sorting.** Somerville's online enrollment system, which allows families to rank preferences across all schools, shows how digital platforms can both expand access and inadvertently concentrate certain populations. This has implications for how ed-tech companies design choice interfaces and information systems.
