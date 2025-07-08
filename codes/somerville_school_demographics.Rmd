@@ -1,0 +1,418 @@
+---
+title: "somerville_school_demographics"
+pdf_document: default
+date: "2025-07-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1 - Scrape and Format School Demographics
+```{r}
+# Test URL
+url <- "https://profiles.doe.mass.edu/profiles/student.aspx?orgcode=02740075&orgtypecode=6&&fycode=2022"
+
+# 1(a): Scrape!
+profile <- read_html(url)
+tables <- html_elements(profile, "table")
+
+# Get the demographics table (race/ethnicity)
+ethnicity_table <- tables %>% 
+  html_elements("table.t_detail") %>%
+  html_table() %>% 
+  .[[1]]
+
+# Get the gender table for total enrollment
+gender_table <- tables %>% 
+  html_elements("table.t_detail") %>%
+  html_table() %>% 
+  .[[2]]
+
+print("✅ Step 1(a) completed - tables scraped")
+
+# 1(b): Format!
+# Fix column names (first row contains the actual headers)
+colnames(ethnicity_table) <- ethnicity_table[1, ]
+ethnicity_table <- ethnicity_table[-1, ]
+
+colnames(gender_table) <- gender_table[1, ]
+gender_table <- gender_table[-1, ]
+
+# Get grand total from gender table
+grand_total <- gender_table[gender_table[[1]] == "Total", 2] %>% 
+  as.character() %>% 
+  str_remove_all("[^0-9]") %>% 
+  as.integer()
+
+# Clean and format ethnicity table
+ethnicity_table <- ethnicity_table %>%
+  mutate(
+    `% of School` = as.numeric(`% of School`),
+    num_stu = (`% of School` / 100) * grand_total
+  )
+
+print("✅ Step 1(b) completed - tables formatted")
+print(head(ethnicity_table))
+
+# 1(c): Re-factor!
+# Create abbreviated demographic labels
+ethnicity_table <- ethnicity_table %>%
+  mutate(
+    Race = fct_recode(
+      as.factor(Race),
+      "AIAN" = "American Indian or Alaska Native",
+      "Asian" = "Asian", 
+      "Black" = "Black or African American",
+      "Latino" = "Hispanic or Latino",
+      "Multi-Race" = "Multi-Race, Not Hispanic or Latino",
+      "NHPI" = "Native Hawaiian or Other Pacific Islander", 
+      "White" = "White"
+    )
+  )
+
+print("✅ Step 1(c) completed - categories abbreviated")
+print(ethnicity_table)
+
+
+```
+
+## Step 2: Make a function out of your code above and test it
+
+```{r}
+get_demog_table <- function(html_page) {
+  tryCatch({
+    # Get tables with class "t_detail"
+    tables <- html_elements(html_page, "table.t_detail") %>% html_table()
+    
+    if (length(tables) < 2) return(NULL)
+    
+    # Extract demographics and gender tables
+    ethnicity_table <- tables[[1]]
+    gender_table <- tables[[2]]
+    
+    # Fix column names (use first row as headers)
+    colnames(ethnicity_table) <- ethnicity_table[1, ]
+    ethnicity_table <- ethnicity_table[-1, ]
+    
+    colnames(gender_table) <- gender_table[1, ]
+    gender_table <- gender_table[-1, ]
+    
+    # Get total enrollment from gender table
+    total_row <- gender_table[str_detect(gender_table[[1]], "Total"), ]
+    if (nrow(total_row) == 0) return(NULL)
+    
+    grand_total <- total_row[1, 2] %>% 
+      as.character() %>% 
+      str_remove_all("[^0-9]") %>% 
+      as.integer()
+    
+    if (is.na(grand_total) || grand_total == 0) return(NULL)
+    
+    # Clean column names for easier processing
+    ethnicity_clean <- ethnicity_table %>%
+      # Rename columns to avoid special characters
+      rename_with(~ case_when(
+        str_detect(.x, "Race|Ethnicity") ~ "race_category",
+        str_detect(.x, "% of School|School") ~ "pct_school", 
+        str_detect(.x, "% of District|District") ~ "pct_district",
+        str_detect(.x, "% of State|State") ~ "pct_state",
+        TRUE ~ str_replace_all(.x, "[^A-Za-z0-9]", "_")
+      )) %>%
+      # Convert percentages to numeric
+      mutate(
+        pct_school = as.numeric(pct_school),
+        pct_district = as.numeric(pct_district), 
+        pct_state = as.numeric(pct_state)
+      ) %>%
+      # Filter out rows with missing school percentages
+      filter(!is.na(pct_school)) %>%
+      # Calculate student numbers
+      mutate(
+        total_students = round((pct_school / 100) * grand_total, 1)
+      )
+    
+    # Create final result in the required format
+    result <- ethnicity_clean %>%
+      mutate(
+        Group = "Race/Ethnicity",
+        Category = race_category,
+        School = pct_school,
+        District = pct_district,
+        State = pct_state, 
+        total = as.integer(grand_total)
+      ) %>%
+      select(Group, Category, School, District, State, total) %>%
+      # Add abbreviated categories
+      mutate(
+        category_abrv = case_when(
+          str_detect(Category, "American Indian|Alaska Native") ~ "AIAN",
+          str_detect(Category, "Asian") ~ "Asian",
+          str_detect(Category, "Black|African American") ~ "Black",
+          str_detect(Category, "Hispanic|Latino") ~ "Latino", 
+          str_detect(Category, "Multi-Race") ~ "Multi-Race",
+          str_detect(Category, "Hawaiian|Pacific Islander") ~ "NHPI",
+          str_detect(Category, "White") ~ "White",
+          TRUE ~ Category
+        )
+      )
+    
+    return(result)
+    
+  }, error = function(e) {
+    warning(paste("Error processing page:", e$message))
+    return(NULL)
+  })
+}
+
+# Test the fixed function
+print("🔧 Testing fixed function...")
+
+# Test with first URL
+url <- "https://profiles.doe.mass.edu/profiles/student.aspx?orgcode=02740075&orgtypecode=6&&fycode=2022"
+html_page <- read_html(url)
+test_result <- get_demog_table(html_page)
+
+if (!is.null(test_result)) {
+  print("✅ Step 2 fixed - function working!")
+  print(test_result)
+} else {
+  print("❌ Still having issues - let's debug further")
+  
+  # Let's see what the raw table looks like
+  tables <- html_elements(html_page, "table.t_detail") %>% html_table()
+  print("Raw ethnicity table:")
+  print(tables[[1]])
+  print("Raw gender table:")
+  print(tables[[2]])
+}
+
+# Test with second URL
+url2 <- "https://profiles.doe.mass.edu/profiles/student.aspx?orgcode=02740087&orgtypecode=6&fycode=2022"
+html_page2 <- read_html(url2)
+test_result2 <- get_demog_table(html_page2)
+
+if (!is.null(test_result2)) {
+  print("✅ Function tested with second school - working!")
+  print(head(test_result2))
+} else {
+  print("❌ Second test failed")
+}
+
+```
+
+## Step 3: Scrape all the pages
+
+```{r}
+
+
+# Identifying schools and years to scrape
+
+# All Somerville schools with their codes
+schools <- c(
+  Healey = "02740075",
+  Argenziano = "02740087", 
+  Brown = "02740015",
+  Kennedy = "02740083",
+  EastSomerville = "02740111",
+  SomervilleHigh = "02740505",
+  WestSomerville = "02740000"
+)
+
+# Years to scrape (assignment mentions 2012-2025, but data availability is 2005-2024)
+years <- 2005:2024
+
+print(glue("✅ Step 3(b) completed - Will scrape {length(schools)} schools × {length(years)} years = {length(schools) * length(years)} pages"))
+
+# Step 3(c): Scrape all the things!
+
+# Create list of all webpages to grab
+pages <- expand_grid(
+  year = years,
+  schoolID = schools
+) %>%
+  # Add school names
+  mutate(
+    school = names(schools)[match(schoolID, schools)]
+  ) %>%
+  # Create URLs
+  mutate(
+    url = glue("https://profiles.doe.mass.edu/profiles/student.aspx?orgcode={schoolID}&orgtypecode=6&fycode={year}")
+  )
+
+print(glue("✅ Created scraping plan for {nrow(pages)} pages"))
+print(head(pages))
+
+# Helper function with polite scraping
+get_page_and_sleep <- function(url) {
+  cat("Working on:", url, "\n")
+  
+  tryCatch({
+    page <- read_html(url)
+    # Be polite to the server
+    Sys.sleep(runif(1, 1, 2))
+    return(page)
+  }, error = function(e) {
+    warning(paste("Failed to scrape:", url, "-", e$message))
+    return(NULL)
+  })
+}
+
+# Create data directory
+dir.create("data", showWarnings = FALSE)
+
+# Do the scraping with progress tracking
+cat("🚀 Starting to scrape all pages...\n")
+cat("This will take a while - scraping", nrow(pages), "pages\n\n")
+
+pages <- pages %>%
+  mutate(
+    data = map(url, get_page_and_sleep)
+  )
+
+print("✅ Step 3(c) completed - all pages scraped")
+
+```
+
+## Step 4: Get the demographic table from all pages
+```{r}
+
+# Extract demographic data from all pages
+all_demographics <- pages %>%
+  mutate(
+    demog_data = pmap(list(data, schoolID, year, school), function(html_page, school_id, yr, school_name) {
+      if (is.null(html_page)) return(NULL)
+      
+      result <- get_demog_table(html_page)
+      if (!is.null(result)) {
+        # Add the metadata columns
+        result$schoolID <- as.integer(school_id)
+        result$year <- as.integer(yr)
+        result$school <- school_name
+      }
+      return(result)
+    })
+  ) %>%
+  # Keep only successful extractions
+  filter(map_lgl(demog_data, ~ !is.null(.x)))
+
+# Debug: Let's see what we have
+print("🔍 Checking extracted data...")
+print(glue("Successfully extracted data from {nrow(all_demographics)} pages"))
+
+# Check a sample result
+if (nrow(all_demographics) > 0) {
+  sample_result <- all_demographics$demog_data[[1]]
+  print("Sample extracted data structure:")
+  print(names(sample_result))
+  print(head(sample_result, 3))
+}
+
+# Combine all results
+final_dataset <- all_demographics %>%
+  pull(demog_data) %>%
+  bind_rows()
+
+# Check what columns we actually have
+print("Columns in combined dataset:")
+print(names(final_dataset))
+print("First few rows:")
+print(head(final_dataset, 5))
+
+# Now select and reorder columns (only select columns that exist)
+available_columns <- names(final_dataset)
+required_columns <- c("year", "schoolID", "school", "Category", "School", "District", "State", "total", "category_abrv")
+
+# Check which required columns are missing
+missing_columns <- setdiff(required_columns, available_columns)
+if (length(missing_columns) > 0) {
+  print(paste("⚠️ Missing columns:", paste(missing_columns, collapse = ", ")))
+  print("Available columns:", paste(available_columns, collapse = ", "))
+}
+
+# Select only the columns that exist
+final_dataset <- final_dataset %>%
+  select(any_of(required_columns)) %>%
+  arrange(year, schoolID, Category)
+
+# Save the final dataset
+dir.create("data", showWarnings = FALSE)
+write_csv(final_dataset, "data/somerville_school_data.csv")
+write_rds(final_dataset, "data/somerville_school_data.rds")
+
+print("✅ Step 4 completed - demographic tables extracted from all pages")
+print(glue("📊 Final dataset: {nrow(final_dataset)} observations"))
+print(glue("📅 Years covered: {min(final_dataset$year, na.rm = TRUE)}-{max(final_dataset$year, na.rm = TRUE)}"))
+print(glue("🏫 Schools: {n_distinct(final_dataset$schoolID)}"))
+print(glue("👥 Demographic categories: {n_distinct(final_dataset$Category)}"))
+
+# Show sample of final data
+print("📋 Sample of final dataset:")
+print(head(final_dataset, 10))
+
+# Show the final structure
+print("📊 Final dataset structure:")
+print(str(final_dataset))
+
+```
+
+
+##Step 5: Visualize the data
+
+```{r}
+=======================================================
+
+# Prepare data for plotting
+plot_data <- final_dataset %>%
+  # Focus on major demographic groups for cleaner visualization
+  filter(Category %in% c("White", "Hispanic or Latino", "Black or African American", "Asian")) %>%
+  # Add proper school names
+  left_join(
+    tibble(
+      schoolID = as.integer(schools),
+      school_name = names(schools)
+    ),
+    by = "schoolID"
+  ) %>%
+  mutate(
+    school_name = factor(school_name, levels = names(schools)),
+    Category = factor(Category, levels = c("White", "Hispanic or Latino", "Black or African American", "Asian"))
+  )
+
+# Create the main demographic trends plot
+demographic_plot <- ggplot(plot_data, aes(x = year, y = School, color = Category)) +
+  geom_line(linewidth = 1, alpha = 0.8) +
+  geom_point(size = 1.5, alpha = 0.7) +
+  facet_wrap(~school_name, ncol = 3) +
+  scale_color_viridis_d(name = "Race/Ethnicity", option = "turbo", end = 0.9) +
+  scale_x_continuous(breaks = seq(2005, 2024, 5)) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 12, color = "gray30"),
+    plot.caption = element_text(size = 9, color = "gray50"),
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = "Demographic Changes in Somerville Schools (2005-2024)",
+    subtitle = "Percentage of student enrollment by racial/ethnic group",
+    x = "Academic Year",
+    y = "Percentage of School Enrollment", 
+    caption = "Data: Massachusetts Department of Elementary and Secondary Education\nAnalysis includes four largest demographic groups"
+  )
+
+# Save the plot
+ggsave("data/demographic_trends.png", demographic_plot, 
+       width = 12, height = 8, dpi = 300, bg = "white")
+
+# Display the plot
+print(demographic_plot)
+
+print("✅ Step 5 completed - visualization created and saved")
+
+
+```
