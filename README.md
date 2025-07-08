@@ -6,7 +6,7 @@ The story begins with the Arthur D. Healey School, which underwent a significant
 
 ## What the Data Reveals
 
-![alt text](results/trend.png)
+![alt text](results/demographic_trends.png)
 
 **Predictable patterns in family school selection.** The data reveals distinct demographic clustering across schools, suggesting that family school choice decisions follow identifiable patterns. Understanding these patterns could inform how education platforms present school information, design recommendation algorithms, or structure choice support tools for families.
 
