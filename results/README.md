@@ -1,6 +1,6 @@
 ## This directory contains the following files:
 - **demographic_trends.png**: Visualizations from the scrapped data
-- **somerville_school_data.csv**: Scrapped data in csv format, output from the step 4 in the [codes](..codes/somerville_school_demographics.Rmd)
+- **somerville_school_data.csv**: Scrapped data in csv format, output from the step 4 in the [codes](../codes/somerville_school_demographics.Rmd)
 - **somerville_school_data.rds**: Scrapped data in rds format, output same as above
 
 # Data Dictionary
